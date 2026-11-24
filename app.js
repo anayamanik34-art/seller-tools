@@ -206,7 +206,7 @@ const PAGES = { dashboard: viewDashboard, products: viewProducts, discounts: vie
 function updateChrome() {
   $("#tabs").hidden = !connected();
   $("#demoBadge").hidden = !isDemo();
-  $("#proBadge").hidden = !proActive || isDemo();
+  $("#proBadge").hidden = !proActive;
   $("#shopLine").textContent = isDemo() ? "Exploring with sample data" : connected() ? "Connected to Gumroad" : "For Gumroad sellers";
   for (const a of document.querySelectorAll("#tabs a")) {
     a.classList.toggle("locked", PRO_PAGES.has(a.dataset.page) && !hasPro());
@@ -290,9 +290,14 @@ function viewWelcome() {
         ${tokenForm("connectForm")}
       </div>
       <div class="card">
-        <h3>Just looking?</h3>
-        <p>Try every feature with a sample shop. Nothing is sent to Gumroad.</p>
+        <h3>Just looking, or no Gumroad store?</h3>
+        <p>Try every feature, including all Pro features, with a sample shop. Nothing is sent to Gumroad.</p>
         <button class="btn" id="tryDemo" type="button">▶ Try the demo</button>
+      </div>
+      <div class="card">
+        <h3>Have an AppSumo code?</h3>
+        <p>${proActive ? "✅ Pro is already unlocked on this device." : 'Unlock Pro first, then connect your store or explore with the sample shop.'}</p>
+        <a class="btn" href="#pro">⭐ ${proActive ? "View Pro" : "Enter your code"}</a>
       </div>
     </section>`;
   wireTokenForm($("#connectForm"), () => { location.hash = "#dashboard"; route(); });
@@ -791,8 +796,9 @@ function wireProCodeForm(form) {
       store.set(K.pro, normalizeCode(code));
       proActive = true;
       toast("Pro unlocked ✅");
-      location.hash = connected() ? "#writer" : "";
-      route();
+      // Not connected yet (for example an AppSumo reviewer): stay on the Pro page, which shows the next steps.
+      if (location.hash === (connected() ? "#writer" : "#pro")) route();
+      else location.hash = connected() ? "#writer" : "#pro";
     } catch (e) { msg.innerHTML = errorBox(e); }
     finally { btn.disabled = false; btn.textContent = "Unlock Pro"; }
   });
@@ -819,7 +825,21 @@ async function viewPro() {
         ${PRO_FEATURES}
         <p class="muted small">Your code is saved only on this device. To use Pro on another device, enter the same code there.</p>
         <button class="btn danger small" id="rmPro" type="button">Remove the code from this device</button>
-      </div>`;
+      </div>
+      ${connected() ? "" : `
+      <div class="card">
+        <h3>Next: choose how to start</h3>
+        <p><strong>Connect your Gumroad store</strong> to use Pro with your real products and sales.</p>
+        <p><a class="btn primary" href="#" id="goConnect">Connect Gumroad</a></p>
+        <p><strong>No Gumroad store, or just testing?</strong> Explore every Pro feature with a sample shop: discount codes, sales export and the AI listing writer. Nothing is sent to Gumroad.</p>
+        <p><button class="btn" id="proDemo" type="button">▶ Explore Pro with the sample shop</button></p>
+      </div>`}`;
+    $("#proDemo")?.addEventListener("click", () => {
+      store.set(K.demo, "1");
+      clearCache();
+      location.hash = "#discounts";
+    });
+    $("#goConnect")?.addEventListener("click", (ev) => { ev.preventDefault(); location.hash = ""; route(); });
     $("#rmPro").addEventListener("click", () => {
       if (!confirm("Remove your Pro code from this device? Keep a copy of it so you can enter it again.")) return;
       store.set(K.pro, ""); proActive = false; toast("Pro code removed"); route();
