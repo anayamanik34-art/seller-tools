@@ -158,3 +158,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 
 .loading { color: var(--muted); padding: 30px 0; text-align: center; }
 .foot { color: var(--muted); font-size: .85rem; padding-top: 10px; padding-bottom: 30px; }
+
+/* Pro-only tabs when Pro is not unlocked */
+.tabs a.locked::after { content: " 🔒"; font-size: .8em; }

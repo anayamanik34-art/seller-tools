@@ -1,6 +1,6 @@
 // Offline support for the app shell. Gumroad and Anthropic requests are never cached.
-const CACHE = "eksoch-seller-tools-v1";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "privacy.html",
+const CACHE = "eksoch-seller-tools-v2";
+const SHELL = ["./", "index.html", "styles.css", "app.js", "pro-codes.js", "manifest.webmanifest", "privacy.html",
   "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

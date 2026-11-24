@@ -10,7 +10,7 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const main = $("#main");
 
 // ---------- Storage (wrapped: storage can be blocked) ----------
-const K = { gum: "est.gumroadToken", ai: "est.anthropicKey", demo: "est.demo" };
+const K = { gum: "est.gumroadToken", ai: "est.anthropicKey", demo: "est.demo", pro: "est.proCode" };
 const store = {
   get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
   set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch { /* ignore */ } },
@@ -20,6 +20,21 @@ const startParams = new URLSearchParams(location.search);
 if (startParams.get("demo") === "1") store.set(K.demo, "1");
 const isDemo = () => store.get(K.demo) === "1";
 const connected = () => isDemo() || !!store.get(K.gum);
+
+// ---------- Pro (unlocked with an AppSumo code, checked on this device) ----------
+// pro-codes.js holds one-way hashes of the valid codes, made by make_appsumo_codes.js.
+const PRO_SALT = "eksoch-seller-tools|";
+const PRO_PAGES = new Set(["discounts", "writer", "export"]);
+const normalizeCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+async function codeIsValid(code) {
+  const norm = normalizeCode(code);
+  if (norm.length < 10 || !self.PRO_CODE_HASHES || !crypto?.subtle) return false;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(PRO_SALT + norm));
+  const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+  return self.PRO_CODE_HASHES.has(hex);
+}
+let proActive = false;
+const hasPro = () => proActive || isDemo();
 
 // ---------- Helpers ----------
 class AppError extends Error {}
@@ -186,19 +201,23 @@ const salesRows = (sales) => sales.map((s) => ({
 // ===================================================================
 // Shell & routing
 // ===================================================================
-const PAGES = { dashboard: viewDashboard, products: viewProducts, discounts: viewDiscounts, writer: viewWriter, export: viewExport, settings: viewSettings };
+const PAGES = { dashboard: viewDashboard, products: viewProducts, discounts: viewDiscounts, writer: viewWriter, export: viewExport, pro: viewPro, settings: viewSettings };
 
 function updateChrome() {
   $("#tabs").hidden = !connected();
   $("#demoBadge").hidden = !isDemo();
+  $("#proBadge").hidden = !proActive || isDemo();
   $("#shopLine").textContent = isDemo() ? "Exploring with sample data" : connected() ? "Connected to Gumroad" : "For Gumroad sellers";
+  for (const a of document.querySelectorAll("#tabs a")) {
+    a.classList.toggle("locked", PRO_PAGES.has(a.dataset.page) && !hasPro());
+  }
 }
 
 let renderId = 0;
 async function route() {
   updateChrome();
-  if (!connected()) return viewWelcome();
   let page = location.hash.slice(1);
+  if (!connected() && page !== "pro") return viewWelcome();
   if (!PAGES[page]) page = "dashboard";
   for (const a of document.querySelectorAll("#tabs a")) {
     if (a.dataset.page === page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
@@ -206,7 +225,8 @@ async function route() {
   const id = ++renderId;
   main.innerHTML = '<div class="loading">Loading…</div>';
   try {
-    await PAGES[page](() => id === renderId);
+    if (PRO_PAGES.has(page) && !hasPro()) viewLocked(page);
+    else await PAGES[page](() => id === renderId);
   } catch (e) {
     if (id === renderId) main.innerHTML = errorBox(e) + (isDemo() ? "" : '<p><a href="#settings">Open Settings</a></p>');
   }
@@ -738,6 +758,87 @@ async function viewExport(current) {
 }
 
 // ===================================================================
+// Pro: unlock with a code
+// ===================================================================
+const PRO_FEATURES = `
+  <ul>
+    <li>✍️ <strong>AI listing writer</strong>: titles, descriptions, 13 tags and SEO text</li>
+    <li>🏷️ <strong>Discount codes</strong>: create, track and delete codes</li>
+    <li>⬇️ <strong>Sales export</strong>: any date range as a CSV file</li>
+  </ul>`;
+const PAGE_NAMES = { discounts: "Discount codes", writer: "The AI listing writer", export: "Sales export" };
+
+function proCodeForm(id) {
+  return `
+    <form id="${id}">
+      <label>Your code <span class="hint">(for example EST-ABCD-EFGH-JKMN)</span>
+        <input name="code" autocomplete="off" spellcheck="false" autocapitalize="characters" required>
+      </label>
+      <div class="formMsg"></div>
+      <button class="btn primary" type="submit">Unlock Pro</button>
+    </form>`;
+}
+
+function wireProCodeForm(form) {
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const msg = $(".formMsg", form);
+    const code = form.code.value.trim();
+    const btn = $("button", form);
+    btn.disabled = true; btn.textContent = "Checking…";
+    try {
+      if (!(await codeIsValid(code))) throw new AppError("That code isn't valid. Check it against your AppSumo purchase and try again.");
+      store.set(K.pro, normalizeCode(code));
+      proActive = true;
+      toast("Pro unlocked ✅");
+      location.hash = connected() ? "#writer" : "";
+      route();
+    } catch (e) { msg.innerHTML = errorBox(e); }
+    finally { btn.disabled = false; btn.textContent = "Unlock Pro"; }
+  });
+}
+
+function viewLocked(page) {
+  main.innerHTML = `
+    <div class="card">
+      <h2>🔒 ${PAGE_NAMES[page]} is part of Pro</h2>
+      <p>Pro adds:</p>
+      ${PRO_FEATURES}
+      <p>Have a code from AppSumo? Enter it below. It unlocks Pro for good in this app.</p>
+      ${proCodeForm("lockForm")}
+    </div>`;
+  wireProCodeForm($("#lockForm"));
+}
+
+async function viewPro() {
+  if (proActive) {
+    main.innerHTML = `
+      <h2>⭐ Pro</h2>
+      <div class="card">
+        <p>✅ <strong>Pro is unlocked</strong> in this app.</p>
+        ${PRO_FEATURES}
+        <p class="muted small">Your code is saved only on this device. To use Pro on another device, enter the same code there.</p>
+        <button class="btn danger small" id="rmPro" type="button">Remove the code from this device</button>
+      </div>`;
+    $("#rmPro").addEventListener("click", () => {
+      if (!confirm("Remove your Pro code from this device? Keep a copy of it so you can enter it again.")) return;
+      store.set(K.pro, ""); proActive = false; toast("Pro code removed"); route();
+    });
+    return;
+  }
+  main.innerHTML = `
+    <h2>⭐ Unlock Pro</h2>
+    <div class="card">
+      <p>The dashboard and products list are open to everyone. Pro adds:</p>
+      ${PRO_FEATURES}
+      <h3>Enter your AppSumo code</h3>
+      ${proCodeForm("proForm")}
+      ${connected() ? "" : '<p class="muted small">After unlocking, connect your Gumroad store to start using it.</p>'}
+    </div>`;
+  wireProCodeForm($("#proForm"));
+}
+
+// ===================================================================
 // Settings
 // ===================================================================
 async function viewSettings() {
@@ -761,6 +862,10 @@ async function viewSettings() {
       ${hasAi ? '<p><button class="btn danger small" id="rmAi" type="button">Remove API key</button></p>' : ""}
     </div>
     <div class="card">
+      <h3>Pro</h3>
+      <p>${isDemo() ? "Demo mode shows every Pro feature." : proActive ? "✅ Pro is unlocked." : "Pro is not unlocked."} <a href="#pro">${proActive ? "Manage Pro" : "Enter a code"}</a></p>
+    </div>
+    <div class="card">
       <h3>This device</h3>
       <p class="muted small">Your keys are stored only in this app on this device and are sent only to Gumroad and Anthropic.</p>
       <button class="btn danger" id="forget" type="button">Disconnect and remove all keys</button>
@@ -782,7 +887,11 @@ async function viewSettings() {
 // ===================================================================
 // Start
 // ===================================================================
-route();
+(async () => {
+  const saved = store.get(K.pro);
+  proActive = !!saved && await codeIsValid(saved).catch(() => false);
+  route();
+})();
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
